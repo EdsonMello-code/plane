@@ -5,7 +5,6 @@ services:
   - type: pserv
     name: penpot-postgres
     env: docker
-    repo: https://github.com/postgres/postgres # Render exige um repo ou imagem Docker
     image:
       url: postgres:15
     plan: starter
@@ -48,11 +47,13 @@ services:
     envVars:
       - key: PENPOT_FLAGS
         value: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
+      # Correção: Montando a URL usando a propriedade 'host' do serviço web
       - key: PENPOT_PUBLIC_URI
         fromService:
           type: web
           name: penpot-frontend
-          property: url
+          property: host
+          renderCommand: "https://{host}"
       - key: PENPOT_HTTP_SERVER_MAX_BODY_SIZE
         value: "367001600"
       - key: PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE
@@ -109,11 +110,13 @@ services:
     envVars:
       - key: PENPOT_REDIS_URI
         value: redis://penpot-valkey:6379/0
+      # Correção: Montando a URL interna do frontend utilizando a porta 8080 nativa do container
       - key: PENPOT_INTERNAL_URI
         fromService:
           type: web
           name: penpot-frontend
-          property: url
+          property: hostport
+          renderCommand: "http://{hostport}"
 
   # ----------------------------------------------------
   # 6. Penpot MCP
