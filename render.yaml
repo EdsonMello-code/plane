@@ -11,7 +11,7 @@ services:
 
     envVars:
       - key: PENPOT_FLAGS
-        value: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
+        value: enable-smtp enable-prepl-server enable-mcp
 
       - key: PENPOT_HTTP_SERVER_MAX_BODY_SIZE
         value: "367001600"
@@ -23,12 +23,7 @@ services:
         fromService:
           type: web
           name: penpot-frontend
-          property: host
-
-    disk:
-      name: penpot-assets
-      mountPath: /opt/data/assets
-      sizeGB: 10
+          envVarKey: RENDER_EXTERNAL_URL
 
     healthCheckPath: /
 
@@ -44,7 +39,13 @@ services:
 
     envVars:
       - key: PENPOT_FLAGS
-        value: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
+        value: enable-smtp enable-prepl-server enable-mcp
+
+      - key: PENPOT_PUBLIC_URI
+        fromService:
+          type: web
+          name: penpot-frontend
+          envVarKey: RENDER_EXTERNAL_URL
 
       - key: PENPOT_HTTP_SERVER_MAX_BODY_SIZE
         value: "367001600"
@@ -52,15 +53,10 @@ services:
       - key: PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE
         value: "367001600"
 
-      - key: PENPOT_PUBLIC_URI
-        fromService:
-          type: web
-          name: penpot-frontend
-          property: host
-
       - key: PENPOT_SECRET_KEY
         generateValue: true
 
+      # PostgreSQL
       - key: PENPOT_DATABASE_URI
         fromDatabase:
           name: penpot-db
@@ -76,58 +72,67 @@ services:
           name: penpot-db
           property: password
 
+      # Valkey
       - key: PENPOT_REDIS_URI
-        value: redis://penpot-valkey:6379/0
+        fromService:
+          type: keyvalue
+          name: penpot-valkey
+          property: connectionString
 
+      # Object storage
       - key: PENPOT_OBJECTS_STORAGE_BACKEND
-        value: fs
+        value: s3
 
-      - key: PENPOT_OBJECTS_STORAGE_FS_DIRECTORY
-        value: /opt/data/assets
+      - key: PENPOT_OBJECTS_STORAGE_S3_ENDPOINT
+        sync: false
 
+      - key: PENPOT_OBJECTS_STORAGE_S3_BUCKET
+        sync: false
+
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+
+      # Telemetry
       - key: PENPOT_TELEMETRY_ENABLED
         value: "true"
 
       - key: PENPOT_TELEMETRY_REFERER
         value: render
 
+      # SMTP
       - key: PENPOT_SMTP_DEFAULT_FROM
-        value: no-reply@example.com
+        sync: false
 
       - key: PENPOT_SMTP_DEFAULT_REPLY_TO
-        value: no-reply@example.com
+        sync: false
 
       - key: PENPOT_SMTP_HOST
-        value: penpot-mailcatch
+        sync: false
 
       - key: PENPOT_SMTP_PORT
-        value: "1025"
+        sync: false
+
+      - key: PENPOT_SMTP_USERNAME
+        sync: false
+
+      - key: PENPOT_SMTP_PASSWORD
+        sync: false
 
       - key: PENPOT_SMTP_TLS
-        value: "false"
+        value: "true"
 
       - key: PENPOT_SMTP_SSL
         value: "false"
 
-    disk:
-      name: penpot-assets
-      mountPath: /opt/data/assets
-      sizeGB: 10
-
-  # ============================================================
-  # PENPOT MCP
-  # ============================================================
-  - type: web
-    name: penpot-mcp
-    runtime: image
-    image:
-      url: docker.io/penpotapp/mcp:2.16
-    plan: starter
+    healthCheckPath: /
 
   # ============================================================
   # PENPOT EXPORTER
   # ============================================================
-  - type: worker
+  - type: private
     name: penpot-exporter
     runtime: image
     image:
@@ -145,33 +150,49 @@ services:
         fromService:
           type: web
           name: penpot-frontend
-          property: host
+          envVarKey: RENDER_EXTERNAL_URL
 
       - key: PENPOT_INTERNAL_URI
-        value: http://penpot-frontend:8080
+        fromService:
+          type: web
+          name: penpot-frontend
+          property: hostport
 
       - key: PENPOT_REDIS_URI
-        value: redis://penpot-valkey:6379/0
+        fromService:
+          type: keyvalue
+          name: penpot-valkey
+          property: connectionString
+
+  # ============================================================
+  # PENPOT MCP
+  # ============================================================
+  - type: web
+    name: penpot-mcp
+    runtime: image
+    image:
+      url: docker.io/penpotapp/mcp:2.16
+    plan: starter
+
+    envVars:
+      - key: PENPOT_PUBLIC_URI
+        fromService:
+          type: web
+          name: penpot-frontend
+          envVarKey: RENDER_EXTERNAL_URL
 
   # ============================================================
   # VALKEY
   # ============================================================
-  - type: pserv
+  - type: keyvalue
     name: penpot-valkey
-    runtime: image
-    image:
-      url: docker.io/valkey/valkey:8.1
     plan: starter
 
-    envVars:
-      - key: VALKEY_EXTRA_FLAGS
-        value: --maxmemory 128mb --maxmemory-policy volatile-lfu
-
-# ==============================================================
-# POSTGRESQL
-# ==============================================================
 databases:
+  # ============================================================
+  # POSTGRESQL
+  # ============================================================
   - name: penpot-db
+    plan: basic-256mb
     databaseName: penpot
     user: penpot
-    plan: basic-256mb
