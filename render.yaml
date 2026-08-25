@@ -1,161 +1,126 @@
 services:
-  # ---------------------------------------------------------------------------
-  # 1. FRONTEND (O único serviço público com URL externa)
-  # ---------------------------------------------------------------------------
-  - type: web
-    name: penpot-frontend
-    env: docker
-    dockerImage: penpotapp/frontend:2.16
-    plan: starter                           # Ajuste o plano conforme necessário
-    port: 8080                              # Porta padrão exposta pelo container
-    envVars:
-      - key: PENPOT_FLAGS
-        value: "disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp"
-      - key: PENPOT_PUBLIC_URI
-        fromContext: pageUrl                 # Usa automaticamente a URL gerada pelo Render
-      - key: PENPOT_HTTP_SERVER_MAX_BODY_SIZE
-        value: "367001600"
-      - key: PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE
-        value: "367001600"
-
-  # ---------------------------------------------------------------------------
-  # 2. BACKEND (Serviço Privado)
-  # ---------------------------------------------------------------------------
-  - type: privateService
-    name: penpot-backend
-    env: docker
-    dockerImage: penpotapp/backend:2.16
-    plan: starter
-    port: 6060                              # Ajuste se o backend escutar em outra porta interna
-    disk:
-      name: penpot-assets
-      mountPath: /opt/data/assets
-      sizeGB: 10                            # Espaço para imagens, fontes e mídias salvas
-    envVars:
-      - key: PENPOT_FLAGS
-        value: "disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp"
-      - key: PENPOT_PUBLIC_URI
-        fromService:
-          type: web
-          name: penpot-frontend
-          property: host
-      - key: PENPOT_SECRET_KEY
-        generateValue: true                 # O Render gera uma chave segura automaticamente
-      - key: PENPOT_HTTP_SERVER_MAX_BODY_SIZE
-        value: "367001600"
-      - key: PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE
-        value: "367001600"
-      # Conexão com o Banco de Dados Interno
-      - key: PENPOT_DATABASE_URI
-        value: "postgresql://penpot-postgres:5432/penpot"
-      - key: PENPOT_DATABASE_USERNAME
-        value: "penpot"
-      - key: PENPOT_DATABASE_PASSWORD
-        value: "penpot"
-      # Conexão com o Valkey (Redis)
-      - key: PENPOT_REDIS_URI
-        value: "redis://penpot-valkey:6379/0"
-      # Armazenamento local persistido no Disk
-      - key: PENPOT_OBJECTS_STORAGE_BACKEND
-        value: "fs"
-      - key: PENPOT_OBJECTS_STORAGE_FS_DIRECTORY
-        value: "/opt/data/assets"
-      # Telemetria
-      - key: PENPOT_TELEMETRY_ENABLED
-        value: "true"
-      - key: PENPOT_TELEMETRY_REFERER
-        value: "render"
-      # Configuração do Mailcatcher interno
-      - key: PENPOT_SMTP_DEFAULT_FROM
-        value: "no-reply@example.com"
-      - key: PENPOT_SMTP_DEFAULT_REPLY_TO
-        value: "no-reply@example.com"
-      - key: PENPOT_SMTP_HOST
-        value: "penpot-mailcatch"
-      - key: PENPOT_SMTP_PORT
-        value: "1025"
-      - key: PENPOT_SMTP_TLS
-        value: "false"
-      - key: PENPOT_SMTP_SSL
-        value: "false"
-
-  # ---------------------------------------------------------------------------
-  # 3. PENPOT MCP (Serviço Privado)
-  # ---------------------------------------------------------------------------
-  - type: privateService
-    name: penpot-mcp
-    env: docker
-    dockerImage: penpotapp/mcp:2.16
-    plan: starter
-
-  # ---------------------------------------------------------------------------
-  # 4. EXPORTER (Serviço Privado para exportar PDF/SVG)
-  # ---------------------------------------------------------------------------
-  - type: privateService
-    name: penpot-exporter
-    env: docker
-    dockerImage: penpotapp/exporter:2.16
-    plan: starter
-    envVars:
-      - key: PENPOT_SECRET_KEY
-        fromService:
-          type: privateService
-          name: penpot-backend
-          property: env.PENPOT_SECRET_KEY
-      - key: PENPOT_PUBLIC_URI
-        fromService:
-          type: web
-          name: penpot-frontend
-          property: host
-      - key: PENPOT_INTERNAL_URI
-        value: "http://penpot-frontend:8080"
-      - key: PENPOT_REDIS_URI
-        value: "redis://penpot-valkey:6379/0"
-
-  # ---------------------------------------------------------------------------
-  # 5. POSTGRESQL (Banco de Dados Privado)
-  # ---------------------------------------------------------------------------
-  - type: privateService
+  # ----------------------------------------------------
+  # 1. Banco de Dados PostgreSQL
+  # ----------------------------------------------------
+  - type: pserv
     name: penpot-postgres
     env: docker
-    dockerImage: postgres:15
+    repo: https://github.com/postgres/postgres # Render exige um repo ou imagem Docker
+    image:
+      url: postgres:15
     plan: starter
-    port: 5432
     disk:
-      name: penpot-postgres-db
+      name: pgdata
       mountPath: /var/lib/postgresql/data
       sizeGB: 10
     envVars:
-      - key: POSTGRES_INITDB_ARGS
-        value: "--data-checksums"
       - key: POSTGRES_DB
-        value: "penpot"
+        value: penpot
       - key: POSTGRES_USER
-        value: "penpot"
+        value: penpot
       - key: POSTGRES_PASSWORD
-        value: "penpot"
+        value: penpot
+      - key: POSTGRES_INITDB_ARGS
+        value: --data-checksums
 
-  # ---------------------------------------------------------------------------
-  # 6. VALKEY (Cache / Websockets Privado)
-  # ---------------------------------------------------------------------------
-  - type: privateService
+  # ----------------------------------------------------
+  # 2. Valkey (Redis)
+  # ----------------------------------------------------
+  - type: pserv
     name: penpot-valkey
     env: docker
-    dockerImage: valkey/valkey:8.1
+    image:
+      url: valkey/valkey:8.1
     plan: starter
-    port: 6379
     envVars:
       - key: VALKEY_EXTRA_FLAGS
-        value: "--maxmemory 128mb --maxmemory-policy volatile-lfu"
+        value: --maxmemory 128mb --maxmemory-policy volatile-lfu
 
-  # ---------------------------------------------------------------------------
-  # 7. MAILCATCHER (Interface Web para testar e-mails recebidos)
-  # ---------------------------------------------------------------------------
-  - type: web
-    name: penpot-mailcatch
+  # ----------------------------------------------------
+  # 3. Penpot Backend
+  # ----------------------------------------------------
+  - type: worker
+    name: penpot-backend
     env: docker
-    dockerImage: sj26/mailcatcher:latest
+    image:
+      url: penpotapp/backend:2.16
     plan: starter
-    port: 1080                              # Abre a interface web do Mailcatcher para você ver os emails disparados
+    envVars:
+      - key: PENPOT_FLAGS
+        value: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
+      - key: PENPOT_PUBLIC_URI
+        fromService:
+          type: web
+          name: penpot-frontend
+          property: url
+      - key: PENPOT_HTTP_SERVER_MAX_BODY_SIZE
+        value: "367001600"
+      - key: PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE
+        value: "367001600"
+      - key: PENPOT_SECRET_KEY
+        generateValue: true
+      - key: PENPOT_DATABASE_URI
+        value: postgresql://penpot@penpot-postgres:5432/penpot
+      - key: PENPOT_DATABASE_USERNAME
+        value: penpot
+      - key: PENPOT_DATABASE_PASSWORD
+        value: penpot
+      - key: PENPOT_REDIS_URI
+        value: redis://penpot-valkey:6379/0
+      - key: PENPOT_OBJECTS_STORAGE_BACKEND
+        value: fs
+      - key: PENPOT_OBJECTS_STORAGE_FS_DIRECTORY
+        value: /opt/data/assets
+      - key: PENPOT_TELEMETRY_ENABLED
+        value: "true"
+      - key: PENPOT_TELEMETRY_REFERER
+        value: render-blueprint
 
+  # ----------------------------------------------------
+  # 4. Penpot Frontend (Serviço Web Público)
+  # ----------------------------------------------------
+  - type: web
+    name: penpot-frontend
+    env: docker
+    image:
+      url: penpotapp/frontend:2.16
+    plan: starter
+    disk:
+      name: penpot-assets
+      mountPath: /opt/data/assets
+      sizeGB: 10
+    envVars:
+      - key: PENPOT_FLAGS
+        value: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
+      - key: PENPOT_HTTP_SERVER_MAX_BODY_SIZE
+        value: "367001600"
+      - key: PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE
+        value: "367001600"
 
+  # ----------------------------------------------------
+  # 5. Penpot Exporter
+  # ----------------------------------------------------
+  - type: worker
+    name: penpot-exporter
+    env: docker
+    image:
+      url: penpotapp/exporter:2.16
+    plan: starter
+    envVars:
+      - key: PENPOT_REDIS_URI
+        value: redis://penpot-valkey:6379/0
+      - key: PENPOT_INTERNAL_URI
+        fromService:
+          type: web
+          name: penpot-frontend
+          property: url
+
+  # ----------------------------------------------------
+  # 6. Penpot MCP
+  # ----------------------------------------------------
+  - type: worker
+    name: penpot-mcp
+    env: docker
+    image:
+      url: penpotapp/mcp:2.16
+    plan: starter
